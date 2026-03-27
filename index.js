@@ -6,5 +6,13 @@ const bot = new TelegramBot(token, { polling: true });
 
 bot.on('message', (msg) => {
   const chatId = msg.chat.id;
-  bot.sendMessage(chatId, "البوت شغال يا معلم 🔥");
+  const text = msg.text;
+
+  if (!text) return;
+
+  if (text.includes("tiktok.com")) {
+    bot.sendMessage(chatId, "جاري تحميل الفيديو... ⏳");
+  } else {
+    bot.sendMessage(chatId, "ابعت لينك تيك توك بس 👇");
+  }
 });
