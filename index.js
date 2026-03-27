@@ -80,11 +80,7 @@ function download(chatId) {
   let command;
 
   if (type === "video") {
-    // 🔥 تحميل + ضغط قوي جدًا
-    command = `
-    yt-dlp -f "best[height<=${quality}]" -o temp.mp4 "${url}" &&
-    ffmpeg -i temp.mp4 -vcodec libx264 -crf 32 -preset veryfast -acodec aac -b:a 64k "${file}"
-    `;
+    command = `yt-dlp -f "best[height<=${quality}]" -o "${file}" "${url}"`;
   } else {
     command = `yt-dlp -x --audio-format mp3 -o "${file}" "${url}"`;
   }
@@ -93,35 +89,43 @@ function download(chatId) {
     if (err) {
       console.log(err);
 
-      // fallback تلقائي
+      // fallback
       if (type === "video" && quality !== "360") {
         userState[chatId].quality = "360";
         return download(chatId);
       }
 
-      return bot.sendMessage(chatId, "❌ فشل التحميل حتى بعد التقليل");
+      return bot.sendMessage(chatId, "❌ فشل التحميل");
     }
 
     if (type === "video") {
-      bot.sendVideo(chatId, file)
-        .then(() => cleanup(file))
-        .catch(() => {
-          // fallback لو لسه كبير
-          if (quality !== "360") {
-            userState[chatId].quality = "360";
-            download(chatId);
-          } else {
-            bot.sendMessage(chatId, "❌ الفيديو كبير جدًا");
-          }
-        });
+      const size = fs.statSync(file).size / (1024 * 1024); // MB
+
+      // لو صغير
+      if (size < 49) {
+        return bot.sendVideo(chatId, file)
+          .then(() => cleanup(file))
+          .catch(() => sendAsFile(chatId, file));
+      }
+
+      // لو كبير
+      return sendAsFile(chatId, file);
     } else {
       bot.sendAudio(chatId, file).then(() => cleanup(file));
     }
   });
 }
 
+// إرسال كملف
+function sendAsFile(chatId, file) {
+  bot.sendMessage(chatId, "📦 الفيديو كبير، هبعته كملف...");
+
+  bot.sendDocument(chatId, file)
+    .then(() => cleanup(file))
+    .catch(() => bot.sendMessage(chatId, "❌ فشل الإرسال"));
+}
+
 // تنظيف
 function cleanup(file) {
   if (fs.existsSync(file)) fs.unlinkSync(file);
-  if (fs.existsSync("temp.mp4")) fs.unlinkSync("temp.mp4");
 }
