@@ -4,13 +4,16 @@ const fs = require("fs");
 
 const bot = new TelegramBot(process.env.BOT_TOKEN);
 
-// 🔥 تنظيف أي جلسة قديمة
-bot.deleteWebHook().then(() => {
-  bot.startPolling();
+// 🔥 حل مشكلة 409 نهائي
+bot.deleteWebHook({ drop_pending_updates: true }).then(() => {
+  bot.startPolling({
+    params: { timeout: 10 }
+  });
 });
 
 console.log("BOT STARTED");
 
+// استقبال أي رسالة
 bot.on("message", (msg) => {
   const chatId = msg.chat.id;
   const url = msg.text;
@@ -21,17 +24,27 @@ bot.on("message", (msg) => {
 
   bot.sendMessage(chatId, "⏳ جاري التحميل...");
 
-  const fixedUrl = url.replace("vm.tiktok.com", "www.tiktok.com");
+  // تصليح لينكات تيك توك
+  let fixedUrl = url
+    .replace("vm.tiktok.com", "www.tiktok.com")
+    .replace("vt.tiktok.com", "www.tiktok.com");
+
   const file = `video_${Date.now()}.mp4`;
 
+  // تحميل من كل المنصات
   exec(`yt-dlp -f "bv*+ba/best" --no-playlist -o "${file}" "${fixedUrl}"`, (err, stdout, stderr) => {
+
     if (err) {
       console.log(stderr);
-      return bot.sendMessage(chatId, "❌ فشل التحميل");
+      return bot.sendMessage(chatId, "❌ حصل خطأ في التحميل");
     }
 
     bot.sendVideo(chatId, file)
-      .then(() => fs.unlinkSync(file))
-      .catch(() => bot.sendMessage(chatId, "❌ الفيديو كبير"));
+      .then(() => {
+        fs.unlinkSync(file);
+      })
+      .catch(() => {
+        bot.sendMessage(chatId, "❌ الفيديو كبير أو حصل خطأ");
+      });
   });
 });
