@@ -37,7 +37,7 @@ bot.on("message", (msg) => {
 });
 
 // الأزرار
-bot.on("callback_query", async (query) => {
+bot.on("callback_query", (query) => {
   const chatId = query.message.chat.id;
   const data = query.data;
 
@@ -79,29 +79,41 @@ function download(chatId) {
 
   let command;
 
-  // 💣 TikTok بدون علامة مائية
-  if (url.includes("tiktok.com") && type === "video") {
-    command = `yt-dlp -f "bestvideo[height<=${quality}]+bestaudio/best" --merge-output-format mp4 --no-playlist -o "${file}" "${url}"`;
-  }
-
-  // فيديو عادي
-  else if (type === "video") {
-    command = `yt-dlp -f "bestvideo[height<=${quality}]+bestaudio/best" -o "temp.mp4" "${url}" && ffmpeg -i temp.mp4 -vcodec libx264 -crf 28 "${file}"`;
-  }
-
-  // صوت
-  else {
+  if (type === "video") {
+    // 🔥 تحميل + ضغط قوي جدًا
+    command = `
+    yt-dlp -f "best[height<=${quality}]" -o temp.mp4 "${url}" &&
+    ffmpeg -i temp.mp4 -vcodec libx264 -crf 32 -preset veryfast -acodec aac -b:a 64k "${file}"
+    `;
+  } else {
     command = `yt-dlp -x --audio-format mp3 -o "${file}" "${url}"`;
   }
 
   exec(command, (err) => {
     if (err) {
       console.log(err);
-      return bot.sendMessage(chatId, "❌ حصل خطأ");
+
+      // fallback تلقائي
+      if (type === "video" && quality !== "360") {
+        userState[chatId].quality = "360";
+        return download(chatId);
+      }
+
+      return bot.sendMessage(chatId, "❌ فشل التحميل حتى بعد التقليل");
     }
 
     if (type === "video") {
-      bot.sendVideo(chatId, file).then(() => cleanup(file));
+      bot.sendVideo(chatId, file)
+        .then(() => cleanup(file))
+        .catch(() => {
+          // fallback لو لسه كبير
+          if (quality !== "360") {
+            userState[chatId].quality = "360";
+            download(chatId);
+          } else {
+            bot.sendMessage(chatId, "❌ الفيديو كبير جدًا");
+          }
+        });
     } else {
       bot.sendAudio(chatId, file).then(() => cleanup(file));
     }
