@@ -2,52 +2,95 @@ const TelegramBot = require("node-telegram-bot-api");
 const { exec } = require("child_process");
 const fs = require("fs");
 
-const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
+const token = process.env.BOT_TOKEN;
+const bot = new TelegramBot(token, { polling: true });
+
+let userData = {};
 
 bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text;
 
-  if (!text || !text.startsWith("http")) {
-    return bot.sendMessage(chatId, "ابعت لينك صحيح 😅");
+  if (!text) return;
+
+  if (text.includes("http")) {
+    userData[chatId] = { url: text };
+
+    bot.sendMessage(chatId, "اختار نوع التحميل 👇", {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🎥 فيديو", callback_data: "video" }],
+          [{ text: "🎧 صوت", callback_data: "audio" }],
+        ],
+      },
+    });
+  }
+});
+
+bot.on("callback_query", async (query) => {
+  const chatId = query.message.chat.id;
+  const data = query.data;
+
+  if (!userData[chatId]) return;
+
+  const url = userData[chatId].url;
+
+  // اختيار صوت
+  if (data === "audio") {
+    bot.sendMessage(chatId, "⏳ جاري تحميل الصوت...");
+
+    exec(`yt-dlp -x --audio-format mp3 "${url}" -o "audio.%(ext)s"`, (err) => {
+      if (err) return bot.sendMessage(chatId, "❌ حصل خطأ");
+
+      bot.sendAudio(chatId, fs.createReadStream("audio.mp3")).then(() => {
+        fs.unlinkSync("audio.mp3");
+      });
+    });
   }
 
-  bot.sendMessage(chatId, "⏳ جاري التحميل...");
+  // اختيار فيديو -> نجيب الجودات
+  if (data === "video") {
+    exec(`yt-dlp -F "${url}"`, (err, stdout) => {
+      if (err) return bot.sendMessage(chatId, "❌ مش قادر يجيب الجودات");
 
-  const file = `video_${Date.now()}.mp4`;
+      let qualities = [];
 
-  const command = `yt-dlp -f "best[height<=720]" --merge-output-format mp4 "${text}" -o "${file}"`;
+      stdout.split("\n").forEach((line) => {
+        if (line.includes("mp4") && line.includes("x")) {
+          const parts = line.trim().split(/\s+/);
+          qualities.push(parts[0]);
+        }
+      });
 
-  exec(command, async (error, stdout, stderr) => {
-    if (error) {
-      console.log(stderr);
-      return bot.sendMessage(chatId, "❌ حصل خطأ في التحميل");
-    }
+      qualities = qualities.slice(0, 3); // نعرض 3 بس
 
-    try {
-      const stats = fs.statSync(file);
+      let buttons = qualities.map((q) => [
+        { text: `🎬 ${q}`, callback_data: "q_" + q },
+      ]);
 
-      // لو الفيديو كبير
-      if (stats.size > 49 * 1024 * 1024) {
-        await bot.sendMessage(chatId, "⚠️ الفيديو كبير... هبعت صوت بس");
+      bot.sendMessage(chatId, "اختار الجودة 👇", {
+        reply_markup: {
+          inline_keyboard: buttons,
+        },
+      });
+    });
+  }
 
-        const audioFile = file.replace(".mp4", ".mp3");
+  // تحميل بالجودة المختارة
+  if (data.startsWith("q_")) {
+    const quality = data.split("_")[1];
 
-        exec(`yt-dlp -x --audio-format mp3 "${text}" -o "${audioFile}"`, async () => {
-          await bot.sendAudio(chatId, audioFile);
-          fs.unlinkSync(audioFile);
+    bot.sendMessage(chatId, "⏳ جاري التحميل...");
+
+    exec(
+      `yt-dlp -f ${quality}+bestaudio "${url}" -o "video.mp4"`,
+      (err) => {
+        if (err) return bot.sendMessage(chatId, "❌ فشل التحميل");
+
+        bot.sendVideo(chatId, fs.createReadStream("video.mp4")).then(() => {
+          fs.unlinkSync("video.mp4");
         });
-
-        fs.unlinkSync(file);
-        return;
       }
-
-      await bot.sendVideo(chatId, file);
-      fs.unlinkSync(file);
-
-    } catch (err) {
-      console.log(err);
-      bot.sendMessage(chatId, "❌ حصل خطأ بعد التحميل");
-    }
-  });
+    );
+  }
 });
