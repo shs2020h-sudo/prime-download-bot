@@ -6,109 +6,99 @@ const path = require('path');
 const token = process.env.BOT_TOKEN;
 const bot = new TelegramBot(token, { polling: true });
 
-// إنشاء مجلد مؤقت للتحميلات إذا لم يكن موجوداً
 const downloadDir = path.join(__dirname, 'downloads');
-if (!fs.existsSync(downloadDir)) {
-    fs.mkdirSync(downloadDir);
-}
+if (!fs.existsSync(downloadDir)) fs.mkdirSync(downloadDir);
 
-// 1️⃣ خطوة: استقبال الرابط وعرض الخيارات
+// 1️⃣ استقبال الرابط (يوتيوب، فيسبوك، إنستجرام، تيك توك، تويتر)
 bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
     const url = msg.text;
 
     if (url && url.startsWith('http')) {
-        bot.sendMessage(chatId, "⏳ جاري فحص الرابط واستخراج الجودات المتاحة...");
+        bot.sendMessage(chatId, "🔍 جاري فحص الرابط (ستوري / ريلز / فيديو)...");
 
-        // جلب معلومات الفيديو بدون تحميل (-j تعني JSON)
-        exec(`yt-dlp -j --cookies cookies.txt "${url}"`, (error, stdout) => {
+        // أمر yt-dlp لجلب البيانات مع دعم الكوكيز وتجاهل الأخطاء البسيطة
+        const checkCmd = `yt-dlp -j --no-warnings --cookies cookies.txt "${url}"`;
+
+        exec(checkCmd, (error, stdout) => {
             if (error) {
-                return bot.sendMessage(chatId, "❌ خطأ: الرابط غير مدعوم أو المحتوى خاص.");
+                return bot.sendMessage(chatId, "❌ فشل الوصول للمحتوى. تأكد أن الرابط عام (Public) وأن ملف cookies.txt مفعل.");
             }
 
             try {
                 const info = JSON.parse(stdout);
-                const title = info.title;
+                const title = info.title || "Video";
                 
-                // تصفية التنسيقات (فيديو + صوت) واختيار أفضل 5 جودات
-                const formats = info.formats
-                    .filter(f => f.vcodec !== 'none' && f.acodec !== 'none') 
-                    .slice(-5);
+                // تصفية الجودات: نختار أفضل جودة MP4 أو جودات مدمجة
+                let formats = info.formats
+                    .filter(f => (f.vcodec !== 'none' && f.acodec !== 'none') || f.ext === 'mp4' || f.protocol === 'https')
+                    .slice(-3); // نختار أهم 3 جودات لتسهيل الاختيار على الموبايل
 
                 const keyboard = formats.map(f => [{
-                    text: `🎥 ${f.resolution || f.format_note} (${f.ext})`,
+                    text: `🎥 ${f.resolution || f.format_note || 'Download'} (${f.ext})`,
                     callback_data: `dl|${f.format_id}|${url}`
                 }]);
 
-                // إضافة خيار الصوت فقط
+                // خيار الصوت لليوتيوب وتيك توك
                 keyboard.push([{ text: "🎧 تحميل صوت (MP3)", callback_data: `audio|best|${url}` }]);
 
-                bot.sendMessage(chatId, `🎬 *${title}*\n\nإختر النوع والجودة:`, {
+                bot.sendMessage(chatId, `✅ تم العثور على: *${title}*\nمن منصة: *${info.extractor_key}*\n\nإختر النوع:`, {
                     parse_mode: 'Markdown',
                     reply_markup: { inline_keyboard: keyboard }
                 });
             } catch (e) {
-                bot.sendMessage(chatId, "❌ حدث خطأ أثناء معالجة البيانات.");
+                bot.sendMessage(chatId, "❌ حدث خطأ في تحليل بيانات الرابط.");
             }
         });
     }
 });
 
-// 2️⃣ خطوة: معالجة ضغطة الزر والتحميل (Callback Query)
+// 2️⃣ المعالجة والتحميل الفعلي
 bot.on('callback_query', async (query) => {
     const chatId = query.message.chat.id;
     const [type, formatId, url] = query.data.split('|');
-    const fileName = `file_${Date.now()}.%(ext)s`;
-    const filePath = path.join(downloadDir, fileName);
+    const timestamp = Date.now();
+    const outputTemplate = path.join(downloadDir, `${timestamp}.%(ext)s`);
 
-    bot.answerCallbackQuery(query.id, { text: "🚀 بدأ التحميل، انتظر قليلاً..." });
-    const statusMsg = await bot.sendMessage(chatId, "📥 جاري تحميل الملف ومعالجته...");
+    bot.answerCallbackQuery(query.id, { text: "🚀 جاري التحميل والدمج..." });
+    const statusMsg = await bot.sendMessage(chatId, "📥 جاري السحب من السيرفرات... لحظات.");
 
     let command = '';
     if (type === 'dl') {
-        // تحميل فيديو بجودة محددة
-        command = `yt-dlp -f ${formatId} --cookies cookies.txt -o "${path.join(downloadDir, 'video_' + Date.now() + '.%(ext)s')}" "${url}"`;
+        // الحل الشامل لدمج الصوت والفيديو في يوتيوب وتويتر
+        command = `yt-dlp -f "${formatId}+bestaudio/best" --merge-output-format mp4 --cookies cookies.txt --no-warnings -o "${outputTemplate}" "${url}"`;
     } else {
-        // تحميل صوت فقط وتحويله لـ mp3 باستخدام ffmpeg
-        command = `yt-dlp -x --audio-format mp3 --cookies cookies.txt -o "${path.join(downloadDir, 'audio_' + Date.now() + '.%(ext)s')}" "${url}"`;
+        command = `yt-dlp -x --audio-format mp3 --cookies cookies.txt -o "${outputTemplate}" "${url}"`;
     }
 
-    // تنفيذ أمر التحميل
-    exec(command, (error, stdout, stderr) => {
+    exec(command, (error) => {
         if (error) {
-            return bot.editMessageText("❌ فشل التحميل. قد يكون حجم الملف كبيراً جداً.", {
-                chat_id: chatId,
-                message_id: statusMsg.message_id
+            return bot.editMessageText("❌ عذراً، تعذر التحميل. قد يكون الملف محمي أو حجمه يتخطى 50MB.", {
+                chat_id: chatId, message_id: statusMsg.message_id
             });
         }
 
-        // البحث عن الملف الذي تم تحميله في المجلد
         const files = fs.readdirSync(downloadDir);
-        const downloadedFile = files.find(f => f.includes(String(Date.now()).substring(0, 5)));
+        const downloadedFile = files.find(f => f.startsWith(String(timestamp)));
 
         if (downloadedFile) {
             const finalPath = path.join(downloadDir, downloadedFile);
-            
-            bot.editMessageText("✅ تم التحميل! جاري الرفع إلى تيليجرام...", {
-                chat_id: chatId,
-                message_id: statusMsg.message_id
+            bot.editMessageText("📤 اكتمل التحميل! جاري الرفع لتليجرام...", {
+                chat_id: chatId, message_id: statusMsg.message_id
             });
 
-            // 3️⃣ خطوة: إرسال الملف للمستخدم
-            if (type === 'dl') {
-                bot.sendVideo(chatId, finalPath).then(() => cleanup(finalPath));
-            } else {
-                bot.sendAudio(chatId, finalPath).then(() => cleanup(finalPath));
-            }
+            const sendOptions = { caption: "تم التحميل بنجاح ✅" };
+
+            const action = (type === 'dl') 
+                ? bot.sendVideo(chatId, finalPath, sendOptions) 
+                : bot.sendAudio(chatId, finalPath, sendOptions);
+
+            action.then(() => cleanup(finalPath))
+                  .catch(() => bot.sendMessage(chatId, "❌ الملف جاهز على السيرفر لكنه كبير جداً على الرفع المباشر (أكبر من 50MB)."));
         }
     });
 });
 
-// وظيفة لمسح الملفات بعد الإرسال لتوفير المساحة
 function cleanup(filePath) {
-    try {
-        fs.unlinkSync(filePath);
-    } catch (e) {
-        console.error("Error deleting file:", e);
-    }
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
 }
