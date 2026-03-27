@@ -1,96 +1,45 @@
-const TelegramBot = require("node-telegram-bot-api");
-const { exec } = require("child_process");
-const fs = require("fs");
+const TelegramBot = require('node-telegram-bot-api');
+const { exec } = require('child_process');
+const fs = require('fs');
 
 const token = process.env.BOT_TOKEN;
 const bot = new TelegramBot(token, { polling: true });
 
-let userData = {};
+// 1️⃣ استقبال اللينك
+bot.on('message', async (msg) => {
+    const chatId = msg.chat.id;
+    const url = msg.text;
 
-bot.on("message", async (msg) => {
-  const chatId = msg.chat.id;
-  const text = msg.text;
+    if (url.startsWith('http')) {
+        bot.sendMessage(chatId, "⏳ جاري فحص الرابط واستخراج الجودات...");
+        
+        // 2️⃣ و 3️⃣ استخراج المعلومات والجودات بصيغة JSON
+        // استخدمنا --cookies-from-file عشان يتخطى حظر فيسبوك وإنستجرام
+        exec(`yt-dlp -j --cookies cookies.txt ${url}`, (error, stdout, stderr) => {
+            if (error) {
+                return bot.sendMessage(chatId, "❌ عذراً، الرابط غير مدعوم أو فيه مشكلة.");
+            }
 
-  if (!text) return;
+            const info = JSON.parse(stdout);
+            const title = info.title;
+            
+            // تصفية الجودات (عرض الفيديو فقط كمثال)
+            const formats = info.formats
+                .filter(f => f.vcodec !== 'none' && f.resolution) // جودات فيها فيديو
+                .slice(-5); // آخر 5 جودات (الأعلى غالباً)
 
-  if (text.includes("http")) {
-    userData[chatId] = { url: text };
+            const keyboard = formats.map(f => [{
+                text: `🎥 ${f.resolution} (${f.ext})`,
+                callback_data: `dl|${f.format_id}|${url}`
+            }]);
 
-    bot.sendMessage(chatId, "اختار نوع التحميل 👇", {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "🎥 فيديو", callback_data: "video" }],
-          [{ text: "🎧 صوت", callback_data: "audio" }],
-        ],
-      },
-    });
-  }
-});
+            // إضافة خيار تحميل صوت فقط
+            keyboard.push([{ text: "🎧 تحميل صوت (MP3)", callback_data: `audio|best|${url}` }]);
 
-bot.on("callback_query", async (query) => {
-  const chatId = query.message.chat.id;
-  const data = query.data;
-
-  if (!userData[chatId]) return;
-
-  const url = userData[chatId].url;
-
-  // اختيار صوت
-  if (data === "audio") {
-    bot.sendMessage(chatId, "⏳ جاري تحميل الصوت...");
-
-    exec(`yt-dlp -x --audio-format mp3 "${url}" -o "audio.%(ext)s"`, (err) => {
-      if (err) return bot.sendMessage(chatId, "❌ حصل خطأ");
-
-      bot.sendAudio(chatId, fs.createReadStream("audio.mp3")).then(() => {
-        fs.unlinkSync("audio.mp3");
-      });
-    });
-  }
-
-  // اختيار فيديو -> نجيب الجودات
-  if (data === "video") {
-    exec(`yt-dlp -F "${url}"`, (err, stdout) => {
-      if (err) return bot.sendMessage(chatId, "❌ مش قادر يجيب الجودات");
-
-      let qualities = [];
-
-      stdout.split("\n").forEach((line) => {
-        if (line.includes("mp4") && line.includes("x")) {
-          const parts = line.trim().split(/\s+/);
-          qualities.push(parts[0]);
-        }
-      });
-
-      qualities = qualities.slice(0, 3); // نعرض 3 بس
-
-      let buttons = qualities.map((q) => [
-        { text: `🎬 ${q}`, callback_data: "q_" + q },
-      ]);
-
-      bot.sendMessage(chatId, "اختار الجودة 👇", {
-        reply_markup: {
-          inline_keyboard: buttons,
-        },
-      });
-    });
-  }
-
-  // تحميل بالجودة المختارة
-  if (data.startsWith("q_")) {
-    const quality = data.split("_")[1];
-
-    bot.sendMessage(chatId, "⏳ جاري التحميل...");
-
-    exec(
-      `yt-dlp -f ${quality}+bestaudio "${url}" -o "video.mp4"`,
-      (err) => {
-        if (err) return bot.sendMessage(chatId, "❌ فشل التحميل");
-
-        bot.sendVideo(chatId, fs.createReadStream("video.mp4")).then(() => {
-          fs.unlinkSync("video.mp4");
+            bot.sendMessage(chatId, `🎬 *${title}*\n\nاختار الجودة المطلوبة:`, {
+                parse_mode: 'Markdown',
+                reply_markup: { inline_keyboard: keyboard }
+            });
         });
-      }
-    );
-  }
+    }
 });
