@@ -1,56 +1,35 @@
-const TelegramBot = require('node-telegram-bot-api');
-const axios = require('axios');
+const TelegramBot = require("node-telegram-bot-api");
+const { exec } = require("child_process");
+const fs = require("fs");
 
-const token = process.env.BOT_TOKEN;
-const bot = new TelegramBot(token, { polling: true });
+const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
 
-console.log("Bot is running...");
+console.log("BOT STARTED");
 
-bot.on('message', async (msg) => {
+bot.on("message", (msg) => {
   const chatId = msg.chat.id;
-  const text = msg.text;
+  const url = msg.text;
 
-  if (!text) return;
+  if (!url || !url.includes("http")) {
+    return bot.sendMessage(chatId, "ابعت لينك فيديو بس 👇");
+  }
 
   bot.sendMessage(chatId, "⏳ جاري التحميل...");
 
-  try {
-    let videoUrl = null;
+  const file = `video_${Date.now()}.mp4`;
 
-    // TikTok
-    if (text.includes("tiktok.com")) {
-      const res = await axios.get(`https://tikwm.com/api/?url=${text}`);
-      videoUrl = res.data.data.play;
+  exec(`yt-dlp -f best -o "${file}" "${url}"`, (err) => {
+    if (err) {
+      console.log(err);
+      return bot.sendMessage(chatId, "❌ حصل خطأ في التحميل");
     }
 
-    // YouTube
-    else if (text.includes("youtube.com") || text.includes("youtu.be")) {
-      const res = await axios.get(`https://api.vevioz.com/api/button/mp4?url=${text}`);
-      videoUrl = text; // fallback (لينك مباشر لو API فشل)
-    }
-
-    // Facebook
-    else if (text.includes("facebook.com")) {
-      const res = await axios.get(`https://api.fdown.net/download?url=${text}`);
-      videoUrl = text;
-    }
-
-    // Twitter / X
-    else if (text.includes("twitter.com") || text.includes("x.com")) {
-      const res = await axios.get(`https://twitsave.com/info?url=${text}`);
-      videoUrl = text;
-    }
-
-    if (videoUrl) {
-      await bot.sendVideo(chatId, videoUrl, {
-        caption: "🔥 تم التحميل"
+    bot.sendVideo(chatId, file)
+      .then(() => {
+        fs.unlinkSync(file);
+      })
+      .catch(() => {
+        bot.sendMessage(chatId, "❌ الفيديو كبير أو فيه مشكلة");
       });
-    } else {
-      bot.sendMessage(chatId, "❌ اللينك مش مدعوم");
-    }
-
-  } catch (err) {
-    console.log(err);
-    bot.sendMessage(chatId, "❌ حصل خطأ أثناء التحميل");
-  }
+  });
 });
