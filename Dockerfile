@@ -2,7 +2,6 @@ FROM node:18
 
 RUN apt update && apt install -y ffmpeg curl
 
-# تثبيت yt-dlp بالطريقة الصح
 RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
   -o /usr/local/bin/yt-dlp
 
