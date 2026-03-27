@@ -11,7 +11,7 @@ bot.on("message", (msg) => {
   const url = msg.text;
 
   if (!url || !url.includes("http")) {
-    return bot.sendMessage(chatId, "ابعت لينك فيديو بس 👇");
+    return bot.sendMessage(chatId, "ابعت لينك بس 👇");
   }
 
   bot.sendMessage(chatId, "⏳ جاري التحميل...");
@@ -21,15 +21,11 @@ bot.on("message", (msg) => {
   exec(`yt-dlp -f best -o "${file}" "${url}"`, (err) => {
     if (err) {
       console.log(err);
-      return bot.sendMessage(chatId, "❌ حصل خطأ في التحميل");
+      return bot.sendMessage(chatId, "❌ حصل خطأ");
     }
 
     bot.sendVideo(chatId, file)
-      .then(() => {
-        fs.unlinkSync(file);
-      })
-      .catch(() => {
-        bot.sendMessage(chatId, "❌ الفيديو كبير أو فيه مشكلة");
-      });
+      .then(() => fs.unlinkSync(file))
+      .catch(() => bot.sendMessage(chatId, "❌ الفيديو كبير"));
   });
 });
