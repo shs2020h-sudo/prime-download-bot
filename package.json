@@ -1,11 +1,9 @@
 {
-  "name": "telegram-bot",
+  "name": "downloader-bot",
   "version": "1.0.0",
   "main": "index.js",
   "dependencies": {
-    "node-telegram-bot-api": "^0.61.0"
-  },
-  "scripts": {
-    "start": "node index.js"
+    "node-telegram-bot-api": "^0.61.0",
+    "axios": "^1.6.0"
   }
 }
